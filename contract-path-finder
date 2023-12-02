@@ -1,0 +1,77 @@
+import fs from "fs";
+import TOML from "@iarna/toml";
+import * as path from "path";
+import Joi from "joi";
+
+const PROTOSTAR_TOML = "protostar.toml";
+const NILE_DIRECTORY = "contracts";
+const PYTHON_VERSIONS = ["python3.7", "python3.8", "python3.9", "python3.10", "python3.11"];
+
+// Определение схемы для валидации TOML
+const tomlSchema = Joi.object({
+  "protostar.build": Joi.object({
+    "cairo-path": Joi.array().items(Joi.string())
+  }),
+  "protostar.shared_command_configs": Joi.object({
+    "cairo-path": Joi.array().items(Joi.string())
+  }),
+  project: Joi.object({
+    "cairo-path": Joi.array().items(Joi.string())
+  })
+});
+
+interface NileCairoPaths {
+  sitePackagesPath: string | null;
+  nileDirectory: string;
+}
+
+export async function getCairoPathsForProtostar(): Promise<string[]> {
+  try {
+    if (fs.existsSync(PROTOSTAR_TOML)) {
+      const tomlFile = fs.readFileSync(PROTOSTAR_TOML, "utf-8");
+      
+      // Валидация TOML
+      const { error, value } = tomlSchema.validate(TOML.parse(tomlFile));
+      if (error) {
+        throw new Error(`Invalid TOML file: ${error.message}`);
+      }
+
+      const cairoPathsFromBuild = value["protostar.build"]?.["cairo-path"] ?? [];
+      const cairoPathsFromSharedCommandConfigs =
+        value["protostar.shared_command_configs"]?.["cairo-path"] ?? [];
+      const cairoPathsFromProjectConfig = value["project"]?.["cairo-path"] ?? [];
+
+      return [
+        ...cairoPathsFromBuild,
+        ...cairoPathsFromSharedCommandConfigs,
+        ...cairoPathsFromProjectConfig
+      ].flatMap((path) => path || []);
+    }
+  } catch (error) {
+    console.error("Error reading/parsing TOML file:", error.message);
+  }
+
+  return [];
+}
+
+export async function getCairoPathsForNile(): Promise<NileCairoPaths> {
+  if (process.env.VIRTUAL_ENV) {
+    const pythonVirtualEnv = process.env.VIRTUAL_ENV;
+
+    const potentialPythonSitePackagesPath = PYTHON_VERSIONS.map(pythonVersion =>
+      path.join(pythonVirtualEnv, "lib", pythonVersion, "site-packages")
+    ).find(fs.existsSync);
+
+    if (potentialPythonSitePackagesPath) {
+      return {
+        sitePackagesPath: potentialPythonSitePackagesPath,
+        nileDirectory: NILE_DIRECTORY
+      };
+    }
+  }
+
+  return {
+    sitePackagesPath: null,
+    nileDirectory: NILE_DIRECTORY
+  };
+}
